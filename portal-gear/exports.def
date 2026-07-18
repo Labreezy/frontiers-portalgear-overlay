@@ -1,0 +1,4 @@
+EXPORTS
+    DirectInput8Create
+
+    

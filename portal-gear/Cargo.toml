@@ -1,0 +1,25 @@
+[package]
+name = "portal-gear"
+version.workspace = true
+edition = "2021"
+
+[[bin]]
+name = "portal_gear_injector"
+path = "src/main.rs"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+name="portal_gear"
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+hudhook.workspace = true
+imgui.workspace = true
+once_cell.workspace = true
+windows = {version = "0.62.2", features = [
+    "Win32_System_Threading",
+    "Win32_System_Diagnostics_Debug",
+    "Win32_Foundation",
+]}
+neohook = {version = "0.12.0"}
