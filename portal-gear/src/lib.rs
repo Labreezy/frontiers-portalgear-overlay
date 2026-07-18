@@ -91,43 +91,16 @@ impl SavestateData {
         let mut spd: FVec3 = unsafe {std::mem::zeroed()};
         let mut rot: Quaternion = unsafe {std::mem::zeroed()};
 
-        unsafe {
-            let hProcess = GetCurrentProcess();
+    
             let pos_addr = *posBaseData as *const u8; 
-            let pos_base = pos_addr.wrapping_add(0x80);
-            let rot_base = pos_addr.wrapping_add(0x90);
-            let spd_base = pos_addr.wrapping_add(0xD0);
-            //read position
-            ReadProcessMemory(
-                hProcess,
-                pos_base as _,
-                &mut pos as *mut _ as _,
-                size_of::<FVec3>(),
-                None,
-            )
-            .ok()
-            .map(|_| pos);
-            //read speed
-            ReadProcessMemory(
-                hProcess,
-                spd_base as _,
-                &mut spd as *mut _ as _,
-                size_of::<FVec3>(),
-                None,
-            )
-            .ok()
-            .map(|_| spd);
-            //read rotation (probably will be unused)
-            ReadProcessMemory(
-                hProcess,
-                rot_base as _,
-                &mut rot as *mut _ as _,
-                size_of::<Quaternion>(),
-                None,
-            )
-            .ok()
-            .map(|_| rot);
-        }
+            let pos_base = pos_addr.wrapping_add(0x80) as *const FVec3;
+            let rot_base = pos_addr.wrapping_add(0x90) as *const Quaternion;
+            let spd_base = pos_addr.wrapping_add(0xD0) as *const FVec3;
+            unsafe {
+                pos = *pos_base;
+                rot = *rot_base;
+                spd = *spd_base;
+            }
         //deal with the camera eventually
         let info = StateInfo { position: pos, rotation: rot, speed: spd };
         
@@ -153,36 +126,12 @@ impl SavestateData {
             return Some(())
         }
         println!("[PORTAL GEAR] Loading from slot {}", self.currentSaveSlot+1);
+        let pos_addr = *posBaseData as *const u8; 
+        let pos_base = pos_addr.wrapping_add(0x80) as *mut FVec3;
+        let rot_base = pos_addr.wrapping_add(0x90) as *mut Quaternion;
         unsafe {
-            let hProcess = GetCurrentProcess();
-            let pos_addr = *posBaseData as *const u8; 
-            let pos_base = pos_addr.wrapping_add(0x80);
-            let rot_base = pos_addr.wrapping_add(0x90);
-            let spd_base = pos_addr.wrapping_add(0xD0);
-            
-            //write position bytes
-            let pos_bytes: &[u8] = std::slice::from_raw_parts(&info.position as *const FVec3 as *const u8,
-            std::mem::size_of::<FVec3>());
-
-            let rot_bytes: &[u8] = std::slice::from_raw_parts(&info.rotation as *const Quaternion as *const u8,
-                std::mem::size_of::<Quaternion>());
-
-            //Write Position    
-            WriteProcessMemory(
-                hProcess,
-                pos_base as _,
-                pos_bytes.as_ptr() as _,
-                std::mem::size_of::<FVec3>(),
-                None
-            ).ok();
-            //Write Rotation
-            WriteProcessMemory(
-                hProcess,
-                rot_base as _,
-                rot_bytes.as_ptr() as _,
-                std::mem::size_of::<Quaternion>(),
-                None
-            ).ok();
+            core::ptr::write(pos_base, info.position);
+            core::ptr::write(rot_base, info.rotation);
         }
         Some(())
 
@@ -237,6 +186,7 @@ impl ImguiRenderLoop for MainRenderLoop {
         if ui.io().key_ctrl {
             if ui.is_key_pressed(Key::F4) {
                 unhook_all();
+                hudhook::eject();
             }
         }
         //F1 toggles

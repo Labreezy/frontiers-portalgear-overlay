@@ -57,8 +57,5 @@ pub fn detach_overlay() -> Result<(),String> {
     let dllHandle : HMODULE = HMODULE(get_module_handle("portal_gear.dll").unwrap());
     //when the MidHook objects go out of scope they clean themselves up
     HOOK_REGISTRY.lock().unwrap().clear();
-    unsafe {
-        FreeLibrary(dllHandle).ok();
-    }
     Ok(())
 }
