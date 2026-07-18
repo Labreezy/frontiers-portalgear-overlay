@@ -6,6 +6,7 @@ use hudhook::windows::Win32::System::Threading::GetCurrentProcess;
 use hudhook::windows::Win32::System::Diagnostics::Debug::{ReadProcessMemory, WriteProcessMemory};
 //use hudhook::windows::Win32::System::Console::{GetStdHandle, STD_OUTPUT_HANDLE, WriteConsoleA};
 use hudhook::*;
+use neohook::MidHook;
 use neohook::registry::unhook_all;
 use std::ffi::c_void;
 use std::fmt;
@@ -15,7 +16,7 @@ use hudhook::tracing::*;
 use imgui::Key;
 use std::{usize};
 
-use crate::hooks::{HOOK_REGISTRY, init_hooks};
+use crate::hooks::{MidHookWrapper, detach_overlay, init_hooks};
 
 
 
@@ -34,6 +35,7 @@ impl fmt::Display for FVec3 {
 }
 
 #[derive(Debug, Default, Clone, Copy)]
+#[repr(C)]
 struct Quaternion {
     x:f32,
     y:f32,
@@ -50,13 +52,14 @@ struct StateInfo{
     speed: FVec3 //0xD0
 }
 
-#[derive(Default, Clone, Copy)]
+#[derive(Default, Clone)]
 pub struct SavestateData {
     saveSlots : [StateInfo;10],
     currentSaveSlot : usize,
     currentInfo : StateInfo,
     posBase : usize,
     camBase : usize,
+    hookRegistry : Vec<MidHookWrapper>
 }
 
 impl fmt::Display for SavestateData {
@@ -77,8 +80,9 @@ pub static CAM_BASE: Mutex<usize> = Mutex::new(0);
 impl SavestateData {
     pub fn new() -> SavestateData
     {   
-        let _ = init_hooks();
-        SavestateData::default()
+        
+        let mut self = SavestateData::default();
+        init_hooks();
     }
 
     pub fn updateCurrent(&self) -> Option<StateInfo> {
@@ -87,12 +91,12 @@ impl SavestateData {
             return Some(StateInfo::default())
         }
         
-        let mut pos: FVec3 = unsafe {std::mem::zeroed()};
-        let mut spd: FVec3 = unsafe {std::mem::zeroed()};
-        let mut rot: Quaternion = unsafe {std::mem::zeroed()};
+        let pos: FVec3;
+        let spd: FVec3;
+        let rot: Quaternion;
 
     
-            let pos_addr = *posBaseData as *const u8; 
+            let pos_addr = *posBaseData as *const c_void; 
             let pos_base = pos_addr.wrapping_add(0x80) as *const FVec3;
             let rot_base = pos_addr.wrapping_add(0x90) as *const Quaternion;
             let spd_base = pos_addr.wrapping_add(0xD0) as *const FVec3;
@@ -114,7 +118,7 @@ impl SavestateData {
         println!("[PORTAL GEAR] Saving to slot {}", self.currentSaveSlot+1);
         self.saveSlots[self.currentSaveSlot] = self.currentInfo;    
     }
-    pub fn writeInfoFromSlot(self) -> Option<()> {
+    pub fn loadInfoFromSlot(self) -> Option<()> {
         
         let mut posBaseData = POS_BASE.lock().unwrap();
         if *posBaseData == 0 {            
@@ -126,7 +130,7 @@ impl SavestateData {
             return Some(())
         }
         println!("[PORTAL GEAR] Loading from slot {}", self.currentSaveSlot+1);
-        let pos_addr = *posBaseData as *const u8; 
+        let pos_addr = *posBaseData as *const c_void; 
         let pos_base = pos_addr.wrapping_add(0x80) as *mut FVec3;
         let rot_base = pos_addr.wrapping_add(0x90) as *mut Quaternion;
         unsafe {
@@ -156,10 +160,7 @@ impl MainRenderLoop {
         
         
         let mut mrl : Self = MainRenderLoop{stateData: SavestateData::new(), isVisible: true};
-        
-        unsafe {
-            mrl.console_println(format!("{}", "[PORTAL GEAR] Successfully initialized!"));
-        }
+        println!("[PORTAL GEAR] Successfully initialized!");
         mrl
     }
 
@@ -168,14 +169,36 @@ impl MainRenderLoop {
         let mut line_nl = line + "\r\n";
         let line_nl_bytes = line_nl.as_bytes();
         print!("{}", line_nl);
-        
-        
+    }
+    fn eject(&mut self) {
+        detach_overlay();
+        hudhook::eject();
+    }
+
+    fn toggle_visible(&mut self){
+        self.isVisible = !self.isVisible;
+    }
+
+    fn increment_save_slot(&mut self){
+        match self.stateData.currentSaveSlot {
+            0..=8 => self.stateData.currentSaveSlot += 1,
+            9 => self.stateData.currentSaveSlot = 0,
+            _ => ()
+        }
+    }
+
+    fn decrement_save_slot(&mut self){
+        match self.stateData.currentSaveSlot {
+            1..=9 => self.stateData.currentSaveSlot -= 1,
+            0 => self.stateData.currentSaveSlot = 9,
+            _ => ()
+        }
     }
 }
 
 impl ImguiRenderLoop for MainRenderLoop {
 
-
+    
 
     fn render(&mut self, ui: &mut imgui::Ui) {
 
@@ -185,34 +208,25 @@ impl ImguiRenderLoop for MainRenderLoop {
         //ctrl+F4 uninjects the overlay
         if ui.io().key_ctrl {
             if ui.is_key_pressed(Key::F4) {
-                unhook_all();
-                hudhook::eject();
+                self.eject();
             }
         }
         //F1 toggles
         if ui.is_key_pressed(Key::F1) {
-            self.isVisible = !self.isVisible;
+            self.toggle_visible();
         }
         //F9 saves and F10 loads
         if ui.is_key_pressed(Key::F9) {
             self.stateData.saveInfoToSlot();
         } else if ui.is_key_pressed(Key::F10){
-            self.stateData.writeInfoFromSlot();
+            self.stateData.loadInfoFromSlot();
         }
         //Up/Down arrow change slot
 
         if ui.is_key_pressed(Key::UpArrow) {
-            match self.stateData.currentSaveSlot {
-                0..=8 => self.stateData.currentSaveSlot += 1,
-                9 => self.stateData.currentSaveSlot = 0,
-                _ => ()
-            }
+           self.increment_save_slot();
         } else if ui.is_key_pressed(Key::DownArrow) {
-            match self.stateData.currentSaveSlot {
-                1..=9 => self.stateData.currentSaveSlot -= 1,
-                0 => self.stateData.currentSaveSlot = 9,
-                _ => ()
-            }
+           self.decrement_save_slot();
         }
 
 
@@ -222,6 +236,26 @@ impl ImguiRenderLoop for MainRenderLoop {
                 .size([320., 180.], imgui::Condition::FirstUseEver)
                 .build(|| {
                     ui.text(format!("{}", self.stateData));
+                    ui.new_line();
+                    if(ui.button("Save State")){
+                        self.stateData.saveInfoToSlot();
+                    }
+                    ui.same_line();
+                    if(ui.button("Load State")){
+                        self.stateData.loadInfoFromSlot();
+                    }
+                    ui.text("Slot Controls: ");
+                    ui.same_line();
+                    if ui.button("-") {
+                        self.decrement_save_slot();
+                    }
+                    ui.same_line();
+                    if ui.button("+") {
+                        self.increment_save_slot();
+                    }
+                    if ui.button("Exit Portal Gear") {
+                        self.eject();
+                    }
                 });
         }
     }

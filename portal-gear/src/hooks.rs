@@ -22,23 +22,21 @@ unsafe extern "system" fn cam_handler(ctx: *mut HookContext){
 }
 
 #[derive(Debug)]
-pub struct MidHookWrapper(MidHook);
+pub struct MidHookWrapper(pub MidHook);
 
 unsafe impl Send for MidHookWrapper {}
 unsafe impl Sync for MidHookWrapper {}
 
-pub static  HOOK_REGISTRY : Mutex<Vec<MidHookWrapper>> = Mutex::new(Vec::<_>::new());
-
-pub fn init_hooks() -> Result<(), String> {
+pub fn init_hooks() -> Result<Vec<_>, String> {
     let h = get_module_handle("SonicFrontiers.exe").unwrap();
     let position_pattern = Pattern::parse("0F 58 B3 80 00 00 00").unwrap();
     let cam_pattern = Pattern::parse("48 8B D8 0F 11 00 0F 10 4F").unwrap();
-
+    let mut hook_registry : Vec<MidHookWrapper> = Vec::<_>::new();
     if let Some(pos_addr) = unsafe { scan_module(h, &position_pattern)} {
         
         let pos_offset_addr: *const u8 = pos_addr.wrapping_sub(8);
         let pos_hook= unsafe {MidHook::install(pos_offset_addr, pos_handler) }.expect("Position Hook Failed");
-        HOOK_REGISTRY.lock().unwrap().push(MidHookWrapper(pos_hook));
+        hook_registry.push(MidHookWrapper(pos_hook));
         println!("Position hook installed at {pos_offset_addr:p}");
         
         
@@ -47,15 +45,9 @@ pub fn init_hooks() -> Result<(), String> {
             println!("Found camera pattern at {cam_addr:p}");
             let cam_offset_addr = cam_addr.wrapping_sub(3);
             let cam_hook = unsafe { MidHook::install(cam_offset_addr, cam_handler) }.expect("Camera Hook Failed");
-            HOOK_REGISTRY.lock().unwrap().push(MidHookWrapper(cam_hook));
+            hook_registry.push(MidHookWrapper(cam_hook));
             println!("Camera hook installed at {cam_offset_addr:p}");
     }
-    Ok(())
+    Ok(hook_registry)
 }
 
-pub fn detach_overlay() -> Result<(),String> {
-    let dllHandle : HMODULE = HMODULE(get_module_handle("portal_gear.dll").unwrap());
-    //when the MidHook objects go out of scope they clean themselves up
-    HOOK_REGISTRY.lock().unwrap().clear();
-    Ok(())
-}
