@@ -3,7 +3,7 @@
 A pseudo-savestating tool/stat readout for Sonic Frontiers
 
 # How To Use
-Open frontiers, then run  ``portal_gear_overlay.exe``.  You should see the overlay pop up at the top left of your game window. Turn the debug console on in HedgeModManager for additional output and confirmation that it is operational.
+Open frontiers, then run  ``portal_gear_injector.exe``.  You should see the overlay pop up at the top left of your game window. Turn the debug console on in HedgeModManager for additional output and confirmation that it is operational.
 
 
 # Controls
