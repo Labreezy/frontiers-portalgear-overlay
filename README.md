@@ -10,5 +10,5 @@ Open frontiers, then run  ``portal_gear_overlay.exe``.  You should see the overl
 * F1 - Shows/Hides The Overlay.  You can also click on the triangle to collapse and uncollapse it.
 * F9 - Saves your current position into the savestate slot.
 * F10 - Loads your current position from the savestate slot.
-* Ctrl+F4 - Closes and detaches the overlay from the game.
+
 
