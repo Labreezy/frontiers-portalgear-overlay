@@ -182,7 +182,7 @@ impl ImguiRenderLoop for MainRenderLoop {
         } else if ui.is_key_pressed(Key::F10){
             self.state_data.clone().load_from_slot();
         }
-        //Up/Down arrow change slot
+        //Up/Down arrow changes slot
 
         if ui.is_key_pressed(Key::UpArrow) {
            self.increment_save_slot();
