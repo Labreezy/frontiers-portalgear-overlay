@@ -1,8 +1,4 @@
-use std::sync::{Mutex, OnceLock};
-use std::marker::Send;
-use neohook::{DetourError, DetourTransaction, Hook, HookContext, MidHook, MidHookHandler, Pattern, TransactionCore, get_module_handle, scan_module};
-use neohook::{registry};
-use windows::Win32::Foundation::{FreeLibrary, HMODULE};
+use neohook::{HookContext, MidHook, Pattern, get_module_handle, scan_module};
 use crate::{CAM_BASE, POS_BASE};
 
 unsafe extern "system" fn pos_handler(ctx: *mut HookContext){
