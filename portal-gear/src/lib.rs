@@ -2,8 +2,6 @@ pub mod hooks;
 
 use hudhook::hooks::dx11::ImguiDx11Hooks;
 use hudhook::windows::Win32::System::Threading::GetCurrentProcess;
-
-use hudhook::windows::Win32::System::Diagnostics::Debug::{ReadProcessMemory, WriteProcessMemory};
 //use hudhook::windows::Win32::System::Console::{GetStdHandle, STD_OUTPUT_HANDLE, WriteConsoleA};
 use hudhook::*;
 use neohook::MidHook;
@@ -16,7 +14,7 @@ use hudhook::tracing::*;
 use imgui::Key;
 use std::{usize};
 
-use crate::hooks::{MidHookWrapper, detach_overlay, init_hooks};
+use crate::hooks::{init_hooks};
 
 
 
@@ -46,9 +44,13 @@ struct Quaternion {
 
 
 #[derive(Default, Clone, Copy)]
+#[repr(C)]
 struct StateInfo{
+    pad0: [u32;0x20],
     position: FVec3, //0x80
+    pad8C: [u8;4],
     rotation: Quaternion, //0x90
+    padA0: [u16;0x18],
     speed: FVec3 //0xD0
 }
 
@@ -59,7 +61,7 @@ pub struct SavestateData {
     currentInfo : StateInfo,
     posBase : usize,
     camBase : usize,
-    hookRegistry : Vec<MidHookWrapper>
+    hookRegistry : Vec<*const MidHook>
 }
 
 impl fmt::Display for SavestateData {
@@ -81,34 +83,21 @@ impl SavestateData {
     pub fn new() -> SavestateData
     {   
         
-        let mut self = SavestateData::default();
-        init_hooks();
+        let mut data = SavestateData::default();
+        data.hookRegistry = init_hooks().expect("Hook Failed!");
+        data
     }
-
-    pub fn updateCurrent(&self) -> Option<StateInfo> {
+    pub fn updateCurrent(&mut self) -> Option<()> {
         let mut posBaseData = POS_BASE.lock().unwrap();
         if *posBaseData == 0 {            
-            return Some(StateInfo::default())
+            return None;
         }
-        
-        let pos: FVec3;
-        let spd: FVec3;
-        let rot: Quaternion;
-
-    
-            let pos_addr = *posBaseData as *const c_void; 
-            let pos_base = pos_addr.wrapping_add(0x80) as *const FVec3;
-            let rot_base = pos_addr.wrapping_add(0x90) as *const Quaternion;
-            let spd_base = pos_addr.wrapping_add(0xD0) as *const FVec3;
-            unsafe {
-                pos = *pos_base;
-                rot = *rot_base;
-                spd = *spd_base;
-            }
+        let pos_addr = *posBaseData as *const StateInfo; 
+        unsafe {
+            self.currentInfo = std::ptr::read(pos_addr);
+        }
         //deal with the camera eventually
-        let info = StateInfo { position: pos, rotation: rot, speed: spd };
-        
-        Some(info)
+        Some(())
     }
     pub fn saveInfoToSlot(&mut self){
         let mut posBaseData = POS_BASE.lock().unwrap();
@@ -125,22 +114,26 @@ impl SavestateData {
             return Some(())
         }
         
-        let info: StateInfo = self.saveSlots[self.currentSaveSlot];
-        if info.position.x == 0.0 && info.position.y == 0.0 && info.position.z == 0.0 {
+        let slot_info: StateInfo = self.saveSlots[self.currentSaveSlot];
+        if slot_info.position.x == 0.0 && slot_info.position.y == 0.0 && slot_info.position.z == 0.0 {
             return Some(())
         }
         println!("[PORTAL GEAR] Loading from slot {}", self.currentSaveSlot+1);
-        let pos_addr = *posBaseData as *const c_void; 
-        let pos_base = pos_addr.wrapping_add(0x80) as *mut FVec3;
-        let rot_base = pos_addr.wrapping_add(0x90) as *mut Quaternion;
+        let info_addr = *posBaseData as *const StateInfo;
+        
         unsafe {
-            core::ptr::write(pos_base, info.position);
-            core::ptr::write(rot_base, info.rotation);
+            let mut info = *info_addr;
+            info.position = slot_info.position;
+            info.rotation = slot_info.rotation;
         }
         Some(())
-
     }
-
+    fn unhook_all(&mut self){
+        for midhook in self.hookRegistry.clone() {
+            unsafe { midhook.read().unhook().expect("Unhook Failed!"); }
+        }
+        hudhook::eject();
+    }
 }
 
 
@@ -159,20 +152,9 @@ impl MainRenderLoop {
         println!("[PORTAL GEAR] Initializing");
         
         
-        let mut mrl : Self = MainRenderLoop{stateData: SavestateData::new(), isVisible: true};
+        let mrl : Self = MainRenderLoop{stateData: SavestateData::new(), isVisible: true};
         println!("[PORTAL GEAR] Successfully initialized!");
         mrl
-    }
-
-
-    unsafe fn console_println(&self, line: String)  {
-        let mut line_nl = line + "\r\n";
-        let line_nl_bytes = line_nl.as_bytes();
-        print!("{}", line_nl);
-    }
-    fn eject(&mut self) {
-        detach_overlay();
-        hudhook::eject();
     }
 
     fn toggle_visible(&mut self){
@@ -202,13 +184,12 @@ impl ImguiRenderLoop for MainRenderLoop {
 
     fn render(&mut self, ui: &mut imgui::Ui) {
 
-        let info = self.stateData.updateCurrent().unwrap();
-        self.stateData.currentInfo = info;
+        self.stateData.updateCurrent();
         
         //ctrl+F4 uninjects the overlay
         if ui.io().key_ctrl {
             if ui.is_key_pressed(Key::F4) {
-                self.eject();
+                self.stateData.unhook_all();
             }
         }
         //F1 toggles
@@ -219,7 +200,7 @@ impl ImguiRenderLoop for MainRenderLoop {
         if ui.is_key_pressed(Key::F9) {
             self.stateData.saveInfoToSlot();
         } else if ui.is_key_pressed(Key::F10){
-            self.stateData.loadInfoFromSlot();
+            self.stateData.clone().loadInfoFromSlot();
         }
         //Up/Down arrow change slot
 
@@ -242,7 +223,7 @@ impl ImguiRenderLoop for MainRenderLoop {
                     }
                     ui.same_line();
                     if(ui.button("Load State")){
-                        self.stateData.loadInfoFromSlot();
+                        self.stateData.clone().loadInfoFromSlot();
                     }
                     ui.text("Slot Controls: ");
                     ui.same_line();
@@ -254,7 +235,7 @@ impl ImguiRenderLoop for MainRenderLoop {
                         self.increment_save_slot();
                     }
                     if ui.button("Exit Portal Gear") {
-                        self.eject();
+                        self.stateData.unhook_all();
                     }
                 });
         }
