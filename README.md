@@ -11,4 +11,4 @@ Open frontiers, then run  ``portal_gear_injector.exe``.  You should see the over
 * F9 - Saves your current position into the savestate slot.
 * F10 - Loads your current position from the savestate slot.
 
-
+There is no shortcut to detach the program, but there is a button.
