@@ -2,12 +2,12 @@ pub mod hooks;
 
 use hudhook::hooks::dx11::ImguiDx11Hooks;
 use hudhook::*;
-use neohook::MidHook;
+use neohook::{MidHook};
 use std::fmt;
 use std::sync::Mutex;
 use imgui::Key;
 use std::{usize};
-use crate::hooks::{init_hooks};
+use crate::hooks::{init_hooks, unhook_all};
 
 
 
@@ -21,7 +21,8 @@ struct FVec3 {
 
 impl fmt::Display for FVec3 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "X: {:.2} Y: {:.2} Z: {:.2}", self.x, self.y, self.z)
+        let args = format_args!("X: {:.2} Y: {:.2} Z: {:.2}", self.x, self.y, self.z);
+        fmt::write(f, args)
     }
 }
 
@@ -52,12 +53,13 @@ pub struct SavestateData {
     save_slots : [StateInfo;10],
     current_save_slot : usize,
     current_info : StateInfo,
-    hook_registry : Vec<*const MidHook>
+    pub hook_registry : Vec<*const MidHook>
 }
 
 impl fmt::Display for SavestateData {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        writeln!(f, "Current Slot: {}\r\nPosition: {}\r\nSpeed: {}", self.current_save_slot+1, self.current_info.position, self.current_info.speed)
+        let args =  format_args!("Current Slot: {}\r\nPosition: {}\r\nSpeed: {}", self.current_save_slot+1, self.current_info.position, self.current_info.speed);
+        fmt::write(f, args)
     }
 }
 
@@ -73,9 +75,8 @@ pub static CAM_BASE: Mutex<usize> = Mutex::new(0);
 impl SavestateData {
     pub fn new() -> SavestateData
     {   
-        
-        let mut data = SavestateData::default();
-        data.hook_registry = init_hooks().expect("Hook Failed!");
+        let data = SavestateData::default();
+        init_hooks().expect("Could Not Init Hooks");
         data
     }
     pub fn update(&mut self) -> Option<()> {
@@ -118,7 +119,24 @@ impl SavestateData {
     
         Some(())
     }
-    
+
+
+    fn increment_save_slot(&mut self){
+        match self.current_save_slot {
+            0..=8 => self.current_save_slot += 1,
+            9 => self.current_save_slot = 0,
+            _ => ()
+        }
+    }
+
+    fn decrement_save_slot(&mut self){
+        match self.current_save_slot {
+            1..=9 => self.current_save_slot -= 1,
+            0 => self.current_save_slot = 9,
+            _ => ()
+        }
+    }
+
 }
 
 
@@ -134,32 +152,10 @@ struct MainRenderLoop{
 
 impl MainRenderLoop {
     fn new() -> Self {
-        println!("[PORTAL GEAR] Initializing");
-        
-        
+        println!("[PORTAL GEAR] Initializing");        
         let mrl : Self = MainRenderLoop{state_data: SavestateData::new(), is_visible: true};
         println!("[PORTAL GEAR] Successfully initialized!");
         mrl
-    }
-
-    fn toggle_visible(&mut self){
-        self.is_visible = !self.is_visible;
-    }
-
-    fn increment_save_slot(&mut self){
-        match self.state_data.current_save_slot {
-            0..=8 => self.state_data.current_save_slot += 1,
-            9 => self.state_data.current_save_slot = 0,
-            _ => ()
-        }
-    }
-
-    fn decrement_save_slot(&mut self){
-        match self.state_data.current_save_slot {
-            1..=9 => self.state_data.current_save_slot -= 1,
-            0 => self.state_data.current_save_slot = 9,
-            _ => ()
-        }
     }
 }
 
@@ -169,28 +165,27 @@ impl ImguiRenderLoop for MainRenderLoop {
 
     fn render(&mut self, ui: &mut imgui::Ui) {
 
-        self.state_data.update();
+        let mut state_data = &mut self.state_data;
+        state_data.update();
         
         
         //F1 toggles
         if ui.is_key_pressed(Key::F1) {
-            self.toggle_visible();
+            self.is_visible = !self.is_visible;
         }
         //F9 saves and F10 loads
         if ui.is_key_pressed(Key::F9) {
-            self.state_data.save_to_slot();
+            state_data.save_to_slot();
         } else if ui.is_key_pressed(Key::F10){
-            self.state_data.clone().load_from_slot();
+            state_data.clone().load_from_slot();
         }
         //Up/Down arrow changes slot
 
         if ui.is_key_pressed(Key::UpArrow) {
-           self.increment_save_slot();
+           state_data.increment_save_slot();
         } else if ui.is_key_pressed(Key::DownArrow) {
-           self.decrement_save_slot();
+           state_data.decrement_save_slot();
         }
-
-
         if self.is_visible {
             ui.window("Portal Gear v2")
                 .position([10., 10.], imgui::Condition::FirstUseEver)
@@ -208,11 +203,15 @@ impl ImguiRenderLoop for MainRenderLoop {
                     ui.text("Slot Controls: ");
                     ui.same_line();
                     if ui.button("-") {
-                        self.decrement_save_slot();
+                        self.state_data.decrement_save_slot();
                     }
                     ui.same_line();
                     if ui.button("+") {
-                        self.increment_save_slot();
+                        self.state_data.increment_save_slot();
+                    }
+                    ui.new_line();
+                    if ui.button("Detach From Game") {
+                        unhook_all();
                     }
                 });
         }
